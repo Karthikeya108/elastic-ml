@@ -17,7 +17,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from pylab import hist, show
 
 import scipy.sparse.linalg as la
-from cg import cg
+#from cg import cg
 
 #-------------------------------------------------------------------------------
 ## Formats a list of type mainlist as a string
@@ -97,9 +97,9 @@ def openFile(filename):
     else:
         return readDataTrivial(filename)
 
-def evaluate_error(labels, alpha, handler):
+def evaluate_error(labels, alpha, design_matrix):
     error = DataVector(len(labels))
-    handler.B.mult(alpha, error)
+    design_matrix.mult(DataVector(alpha), error)
     error.sub(labels) 
     error.sqr() 
     mse = error.sum() / float(len(error))
@@ -108,11 +108,15 @@ def evaluate_error(labels, alpha, handler):
 
     return mse
 
-
 def run(grid, alpha, training, labels):
     errors = None
     grid_size = grid.getStorage().size()
-    
+    '''
+    Formulating and solving the normal equation  (design_matrix.design_matrix^T + \lambda * identity_matrix) * \alpha = design_matrix^T * label_vector
+    This corresponds to a system of linear eqations  Ax = b which we solve using Conjugate Gradient method
+    '''
+    '''
+    #Using cg from sggp library 
     handler = Matrix(grid, training, 0.01, 'identity')
     b = handler.generateb(labels)
 
@@ -122,8 +126,44 @@ def run(grid, alpha, training, labels):
     residue = cg(b, alpha, imax, epsilon, handler.ApplyMatrix, False)
     
     print residue
+    '''
+    if options.regstr == 'identity':
+        opL = createOperationIdentity(grid)
+    elif options.regstr == 'laplace':
+        opL = createOperationLaplace(grid)
+    
+    design_matrix = createOperationMultipleEval(grid, training)
+    
+    b = DataVector(grid_size)
+    design_matrix.multTranspose(labels, b)
 
-    error = evaluate_error(labels, alpha, handler)
+    #Form the LinearOperator
+    def matvec(v, design_matrix, regparam, regstr):
+        M = training.getNrows();
+        temp = DataVector(M)
+        v = DataVector(v)
+        result = DataVector(grid_size)
+        design_matrix.mult(v, temp)
+        design_matrix.multTranspose(temp, result)
+
+        tmp = DataVector(len(v))
+        if regstr == 'identity':
+            result.axpy(M*regparam, v)
+        elif regstr == 'laplace':
+            opL.mult(v, tmp)
+        
+        result.axpy(M*regparam, tmp)
+        
+        return result.array() 
+
+    matvec_mult = lambda x: matvec(x, design_matrix, options.regparam, options.regstr)
+
+    A = la.LinearOperator((grid_size, grid_size), matvec=matvec_mult, dtype='float64')
+
+    alpha, info = la.cg(A, b.array(), alpha.array())
+    print "CG Info: ",info
+    
+    error = evaluate_error(labels, alpha, design_matrix)
 
     return grid, DataVector(alpha), error
 
@@ -169,8 +209,8 @@ if __name__=='__main__':
         parser = OptionParser()
         parser.add_option("-l", "--level", action="store", type="int", dest="level", help="Gridlevel")
         parser.add_option("-m", "--mode", action="store", type="string", default="apply", dest="mode", help="Specifies the action to do. Get help for the mode please type --mode help.")
-        parser.add_option("-C", "--CMode", action="store", type="string", default="laplace", dest="CMode", help="Specifies the action to do.")
         parser.add_option("-L", "--lambda", action="store", type="float",default=0.01, metavar="LAMBDA", dest="regparam", help="Lambda")
+        parser.add_option("-R", "--regstr", action="store", type="string",default='identity', metavar="REGSTR", dest="regstr", help="RegStrategy")
         parser.add_option("-i", "--imax", action="store", type="int",default=500, metavar="MAX", dest="imax", help="Max number of iterations")
         parser.add_option("-d", "--data", action="append", type="string", dest="data", help="Filename for the Datafile.")
         parser.add_option("-t", "--test", action="store", type="string", dest="test", help="File containing the testdata")
