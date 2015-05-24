@@ -1,6 +1,6 @@
 import sys
 sys.path.append('/home/karthikeya/svn/repo/lib/pysgpp')
-from matplotlib.pylab import *
+sys.path.append('/home/karthikeya/MachineLearning/elastic_ml/pyoptim')
 from tools import *
 from pysgpp import *
 from math import *
@@ -10,14 +10,14 @@ from array import array
 
 import numpy as np
 
-#Required for 'visualizeResult' method
 import matplotlib.pyplot as plt
+import matplotlib.pylab as pl
 from mpl_toolkits.mplot3d import Axes3D
 
-from pylab import hist, show
-
-import scipy.sparse.linalg as la
-#from cg import cg
+from wrappers import SparseGridWrapper
+import seaborn as sns
+import scipy.io.arff as arff
+from algorithms import vSGD, SGD, vSGDfd, AnnealingSGD, AveragingSGD
 
 #-------------------------------------------------------------------------------
 ## Formats a list of type mainlist as a string
@@ -108,64 +108,51 @@ def evaluate_error(labels, alpha, design_matrix):
 
     return mse
 
-def run(grid, alpha, training, labels):
-    errors = None
-    grid_size = grid.getStorage().size()
-    training = DataMatrix(training)
-    labels = DataVector(labels)
-    '''
-    Formulating and solving the normal equation  (design_matrix.design_matrix^T + \lambda * identity_matrix) * \alpha = design_matrix^T * label_vector
-    This corresponds to a system of linear eqations  Ax = b which we solve using Conjugate Gradient method
-    '''
-    '''
-    #Using cg from sggp library 
-    handler = Matrix(grid, training, 0.01, 'identity')
-    b = handler.generateb(labels)
+def collect_mse(s, y, collection, mult_eval):
+    print s.provider._counter
+    if s.provider._counter % 10 == 0:
+        params_DV = DataVector(s.bestParameters)
+        results_DV = DataVector(len(y))
+        mult_eval.mult(params_DV, results_DV)
+        residual = np.linalg.norm(y - results_DV.array())
+        collection.append([s.bestParameters, s.provider._counter, np.mean(s.learning_rate), residual**2/len(y)])
 
-    imax = grid_size
-    epsilon = 0.01
- 
-    residue = cg(b, alpha, imax, epsilon, handler.ApplyMatrix, False)
-    
-    print residue
+def run(grid, alpha, training, labels):
+    grid_size = grid.getStorage().size()
+
+    data = np.vstack((training.T,labels)).T
+
     '''
     if options.regstr == 'identity':
         opL = createOperationIdentity(grid)
     elif options.regstr == 'laplace':
         opL = createOperationLaplace(grid)
+    '''
+    print "Forming the Desing Matrix" 
+    design_matrix = createOperationMultipleEval(grid, DataMatrix(training))
+
+    l = 1E-8
+
+    print "Creating Sparse Grid Wrapper"
+    f = SparseGridWrapper(grid, data, l)
+    x0 = np.zeros(grid_size)
+
+    collect_fd = []
+    collect_cb = lambda s: collect_mse(s, labels, collect_fd, design_matrix)
+    f.reset()
+    algo = vSGDfd(f, x0, callback=collect_cb, loss_target=-np.inf, init_samples=1, batch_size=10)
+    print "Running SGD"
+    algo.run(100)
+
+    collect_fd = np.array(collect_fd)
+
+    info_record = collect_fd[collect_fd.shape[0]-1,:]
+
+    print "Itearation %d, learning rate %f, train MSE %e" %(info_record[1], info_record[2], info_record[3])
+
+    alpha = info_record[0]
     
-    design_matrix = createOperationMultipleEval(grid, training)
-    
-    b = DataVector(grid_size)
-    design_matrix.multTranspose(labels, b)
-
-    #Form the LinearOperator
-    def matvec(v, design_matrix, regparam, regstr):
-        M = training.getNrows();
-        temp = DataVector(M)
-        v = DataVector(v)
-        result = DataVector(grid_size)
-        design_matrix.mult(v, temp)
-        design_matrix.multTranspose(temp, result)
-
-        tmp = DataVector(len(v))
-        if regstr == 'identity':
-            result.axpy(M*regparam, v)
-        elif regstr == 'laplace':
-            opL.mult(v, tmp)
-        
-        result.axpy(M*regparam, tmp)
-        
-        return result.array() 
-
-    matvec_mult = lambda x: matvec(x, design_matrix, options.regparam, options.regstr)
-
-    A = la.LinearOperator((grid_size, grid_size), matvec=matvec_mult, dtype='float64')
-
-    alpha, info = la.cg(A, b.array(), alpha.array())
-    print "CG Info: ",info
-    
-    error = evaluate_error(labels, alpha, design_matrix)
+    error = evaluate_error(DataVector(labels), DataVector(alpha), design_matrix)
 
     return grid, DataVector(alpha), error
 
@@ -174,11 +161,11 @@ def run(grid, alpha, training, labels):
 def do_regression():
     # read data
     data = openFile(options.data[0])
-        
+ 
     training = np.array(data["data"])
 
     labels = np.array(data["classes"])
-
+    
     dim = training.shape[1]
     numData = training.shape[0]
 
