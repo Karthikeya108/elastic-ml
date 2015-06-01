@@ -1,6 +1,8 @@
+from __future__ import division
 import sys
 sys.path.append('/home/karthikeya/svn/repo/lib/pysgpp')
 sys.path.append('/home/karthikeya/MachineLearning/elastic_ml/pyoptim')
+sys.path.append('/home/karthikeya/MachineLearning/elastic_ml/sgct')
 from tools import *
 from pysgpp import *
 from math import *
@@ -19,6 +21,12 @@ import seaborn as sns
 import scipy.io.arff as arff
 from algorithms import vSGD, SGD, vSGDfd, AnnealingSGD, AveragingSGD
 
+# Combination modules
+from combinationScheme import *
+import ActiveSetFactory
+
+from FullGrid import FullGrid
+from scipy.optimize import minimize
 #-------------------------------------------------------------------------------
 ## Formats a list of type mainlist as a string
 # <pre>
@@ -97,9 +105,28 @@ def openFile(filename):
     else:
         return readDataTrivial(filename)
 
+def estimate_grid_coefficients(fullgrid_dict, grid_coeffs_init, labels):
+    grid_results = []
+    for key, values in fullgrid_dict.iteritems():
+        grid_results.append(values[2])
+
+    grid_results = np.array(grid_results).T
+    print grid_results.shape
+    print np.array(grid_coeffs_init).shape
+
+    func = lambda c: np.linalg.norm(np.sum(np.dot(g,c) for g in grid_results) - labels)
+
+    cons = ({'type': 'eq', 'fun' : lambda c: np.sum(c) - 1})
+
+    grid_coeffs = minimize(func, grid_coeffs_init, constraints=cons, method='SLSQP', options={'disp': False})
+    print grid_coeffs
+
+    return grid_coeffs.x
+
 def evaluate_error(labels, alpha, design_matrix):
     error = DataVector(len(labels))
-    design_matrix.mult(DataVector(alpha), error)
+    #design_matrix.mult(DataVector(alpha), error)
+    error = DataVector(np.dot(design_matrix.array(), alpha.array()))
     error.sub(labels) 
     error.sqr() 
     mse = error.sum() / float(len(error))
@@ -111,14 +138,13 @@ def evaluate_error(labels, alpha, design_matrix):
 def collect_mse(s, y, collection, mult_eval):
     print s.provider._counter
     if s.provider._counter % 10 == 0:
-        params_DV = DataVector(s.bestParameters)
-        results_DV = DataVector(len(y))
-        mult_eval.mult(params_DV, results_DV)
-        residual = np.linalg.norm(y - results_DV.array())
-        collection.append([s.bestParameters, s.provider._counter, np.mean(s.learning_rate), residual**2/len(y)])
+        params_DV = s.bestParameters
+        results_DV = np.dot(mult_eval.array(), params_DV)
+        residual = np.linalg.norm(y - results_DV)
+        collection.append([s.bestParameters, results_DV, s.provider._counter, np.mean(s.learning_rate), residual**2/len(y)])
 
 def run(grid, alpha, training, labels):
-    grid_size = grid.getStorage().size()
+    grid_size = grid.get_size()
 
     data = np.vstack((training.T,labels)).T
 
@@ -129,7 +155,8 @@ def run(grid, alpha, training, labels):
         opL = createOperationLaplace(grid)
     '''
     print "Forming the Desing Matrix" 
-    design_matrix = createOperationMultipleEval(grid, DataMatrix(training))
+    design_matrix = grid.evaluate(DataMatrix(training))
+    #design_matrix = DataMatrix(design_matrix)
 
     l = 1E-8
 
@@ -148,13 +175,15 @@ def run(grid, alpha, training, labels):
 
     info_record = collect_fd[collect_fd.shape[0]-1,:]
 
-    print "Itearation %d, learning rate %f, train MSE %e" %(info_record[1], info_record[2], info_record[3])
+    print "Itearation %d, learning rate %f, train MSE %e" %(info_record[2], info_record[3], info_record[4])
 
     alpha = info_record[0]
+
+    result = info_record[1]
     
     error = evaluate_error(DataVector(labels), DataVector(alpha), design_matrix)
 
-    return grid, DataVector(alpha), error
+    return grid, DataVector(alpha), result, error
 
 #-------------------------------------------------------------------------------
 
@@ -176,21 +205,37 @@ def do_regression():
     print "Size of datasets is:", numData
     print "Level is: ", options.level
 
-    grid = Grid.createLinearGrid(dim)
-    generator = grid.createGridGenerator()
-    generator.regular(level)
+    lmin = tuple([2] * dim)
+    lmax = tuple([5] * dim)
+    factory = ActiveSetFactory.ClassicDiagonalActiveSet(lmax, lmin, 0)
+    activeSet = factory.getActiveSet()
+    scheme = combinationSchemeArbitrary(activeSet)
+    scheme_base = combinationSchemeBase()
+    print "Number of sub grids: ",scheme.dictOfScheme
 
-    gsize = grid.getSize()
-    newGsize = 0
+    fullgrid_dict = {}
+    grid_coeffs_init = []
+    for key, value in scheme.dictOfScheme.iteritems():
+        grid = FullGrid(dim, key)
+        grid_coeffs_init.append(value)
 
-    print "Gridsize is:", gsize
+        print "Gridsize is:", grid.get_size()
 
-    alpha = DataVector(grid.getSize())
-    alpha.setAll(1.0)
+        alpha = DataVector(grid.get_size())
+        alpha.setAll(1.0)
 
-    grid, alpha, error = run(grid, alpha, training, labels)
+        grid, alpha, result, error = run(grid, alpha, training, labels)
 
-    return alpha
+        fullgrid_dict[key] = [grid, alpha, result, error]
+
+    for key, values in fullgrid_dict.iteritems():
+        print key,":  ",values[3]
+
+    grid_coeffs = estimate_grid_coefficients(fullgrid_dict, grid_coeffs_init, labels)
+
+    print np.sum(grid_coeffs)
+
+    return fullgrid_dict, grid_coeffs
 
 #-------------------------------------------------------------------------------
 

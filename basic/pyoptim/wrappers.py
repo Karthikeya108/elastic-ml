@@ -22,7 +22,7 @@ class SparseGridWrapper(DatasetWrapper):
         Constructor
         '''
         self.grid = grid
-        self.dim = grid.getStorage().dim()
+        self.dim = grid.get_dim()
         self.dataset = dataset
         self.l = l
         self._ready = False
@@ -55,7 +55,7 @@ class SparseGridWrapper(DatasetWrapper):
         Compute the gradient vector in the current state
         '''
         #import ipdb; ipdb.set_trace() #
-        gradient_array = np.empty((self.batch_size, self.grid.getSize()))
+        gradient_array = np.empty((self.batch_size, self.grid.get_size()))
         for sample_idx in xrange(self.batch_size):
             x = self._lastseen[sample_idx, :self.dim]
             y = self._lastseen[sample_idx, self.dim]
@@ -68,8 +68,10 @@ class SparseGridWrapper(DatasetWrapper):
             
             data_matrix = DataMatrix(x.reshape(1,-1))
         
-            mult_eval = createOperationMultipleEval(self.grid, data_matrix);
-            mult_eval.multTranspose(single_alpha, gradient);
+            mult_eval = self.grid.evaluate(data_matrix)
+            #mult_eval.multTranspose(single_alpha, gradient)
+            mult_eval.transpose()
+            gradient = DataVector(np.dot(mult_eval.array(), single_alpha.array()))
          
             residual = gradient.dotProduct(params_DV) - y;
             gradient.mult(residual);
@@ -105,14 +107,17 @@ class SparseGridWrapper(DatasetWrapper):
         #import ipdb; ipdb.set_trace()
         size = self._lastseen.shape[0]
         data_matrix = DataMatrix(self._lastseen[:,:self.dim])
-        mult_eval = createOperationMultipleEval(self.grid, data_matrix);
-        params_DV = DataVector(self.grid.getSize())
+        #mult_eval = createOperationMultipleEval(self.grid, data_matrix)
+        mult_eval = self.grid.evaluate(data_matrix)
+
+        params_DV = DataVector(self.grid.get_size())
         params_DV.setAll(0.)
         results_DV = DataVector(size)
-        self.H = np.zeros(self.grid.getSize())
-        for i in xrange(self.grid.getSize()):
+        self.H = np.zeros(self.grid.get_size())
+        for i in xrange(self.grid.get_size()):
             params_DV[i] = 1.0
-            mult_eval.mult(params_DV, results_DV);
+            #mult_eval.mult(params_DV, results_DV)
+            results_DV = DataVector(np.dot(mult_eval.array(),params_DV.array()))
             self.H[i] = results_DV.l2Norm()**2
             params_DV[i] = 0.0
         self.H = self.H.reshape(1,-1)/size
