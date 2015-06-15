@@ -2,6 +2,7 @@ import sys, os
 sys.path.append('/home/karthikeya/svn/repo/lib/pysgpp')
 from pysgpp import *
 import numpy as np
+import itertools
 
 class FullGrid:
     def __init__(self, dim, levels, basis=None):
@@ -16,18 +17,40 @@ class FullGrid:
         else:
             self.basis = basis
 
-        self.size = 0
+        self.size = 1
         for l in levels:
-            self.size = self.size + (2**l - 1)
+            self.size = self.size * (2**l - 1)
 
         self.storage = {}
-        for i in xrange(self.size):
-            grid_point = {}
-            for d in xrange(self.dim):
-                for j in xrange(2**levels[d] - 1):
-                    grid_point[d] = [levels[d], j]
-            self.storage[i] = grid_point
+ 
+        for gp in xrange(self.size):
+            self.storage[gp] = {}
 
+        index_dim = []
+
+        for l in levels:
+            index_dim.append(2**l)
+
+        ind_list = np.ones(self.dim, dtype=np.int_)
+        
+        dim_level_index = {}
+        for d in xrange(self.dim):
+            level_index = []
+            for j in xrange(1,2**levels[d]):
+                level_index.append([levels[d], j])
+
+            dim_level_index[d] = level_index    
+
+        values = dim_level_index.values()
+
+        level_index_comb = list(itertools.product(*values))
+
+        for g in xrange(self.size):
+            dim_lev_ind = {}
+            for d in xrange(self.dim):
+                dim_lev_ind[d] = level_index_comb[g][d]
+            self.storage[g] = dim_lev_ind
+        
     def get_size(self):
         return self.size
 
@@ -72,3 +95,64 @@ class FullGrid:
                         column.append(self.linear_basis_function(self.storage[i], self.dim, val))
                 result.append(column)
         return DataMatrix(result)
+
+    def func_num_to_index_list(self, point):
+        phi = [None] * self.dim
+        gpoint = self.storage[point]
+        for d in xrange(self.dim):
+            lev_ind = gpoint[d]
+            index = lev_ind[1]
+            phi[d] = index
+
+        return phi
+
+    def get_stiffness_coefficient(self,l,p1,p2):
+        return np.max(1 - np.abs(2**l - p1),0) * np.max(1 - np.abs(2**l - p2),0)
+
+    def get_mass_coefficient(self,l,p1,p2):
+        return np.max(1 - np.abs(2**l - p1),0) * np.max(1 - np.abs(2**l - p2),0)
+  
+    def create_laplacian_matrix(self):
+        left_term = 0.0
+        right_term = 0.0
+        m_collector = 0.0
+        function_per_dim = [None] * self.dim
+
+        for d in xrange(self.dim):
+            function_per_dim[d] = (1 << self.levels[d]) + 1
+
+        laplacian_matrix = np.ndarray(shape=(self.size,self.size), dtype=float)
+
+        phi_1 = [None] * self.dim
+        phi_2 = [None] * self.dim
+
+        for row in xrange(self.size):
+            phi_1 = self.func_num_to_index_list(row)    
+            for col in xrange(self.size):
+                phi_2 = self.func_num_to_index_list(col)
+                for d in xrange(self.dim):
+                    index_diff = phi_1[d] - phi_2[d]
+                    if index_diff >= -1 and index_diff <= 1:
+                        s = self.get_stiffness_coefficient(self.levels[d],phi_1[d],phi_2[d])
+                        m = self.get_mass_coefficient(self.levels[d],phi_1[d],phi_2[d])
+                        
+                        if d == 0:
+                            left_term = s
+                            right_term = m
+                            m_collector = m
+                        else:
+                            left_term = (left_term + right_term) * m
+                            right_term = m_collector * s
+                            m_collector *= m
+
+                    else:
+                        left_term = right_term = m_collector = 0.0
+
+                laplacian_matrix[row,col] = left_term + right_term - m_collector
+
+        return laplacian_matrix
+                        
+                    
+
+                    
+            
