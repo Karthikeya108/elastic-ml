@@ -106,12 +106,31 @@ class FullGrid:
 
         return phi
 
-    def get_stiffness_coefficient(self,l,p1,p2):
-        return np.max(1 - np.abs(2**l - p1),0) * np.max(1 - np.abs(2**l - p2),0)
+    def get_stiffness_coefficient(self,level,index_1,index_2):
+        if (index_1 - index_2) <= 1 and (index_1 - index_2) >= -1:  #phi_1 and phi_2 are neighbors
+            if index_1 == index_2:                                  #same points
+                if index_1 == 0 or index_1 == 1 << level:           #on boundary
+                    return 1 << (level)
+                else:                                               #not on boundary
+                    return 1 << (level + 1)
+            else:                                                   #neighbor point
+                return -(1 << level)
+        else:
+            return 0
 
-    def get_mass_coefficient(self,l,p1,p2):
-        return np.max(1 - np.abs(2**l - p1),0) * np.max(1 - np.abs(2**l - p2),0)
-  
+
+    def get_mass_coefficient(self,level,index_1,index_2):
+        if (index_1 - index_2) <= 1 and (index_1 - index_2) >= -1:  #phi_1 and phi_2 are neighbors
+            if index_1 == index_2:                                 #same points
+                if index_1 == 0 or index_1 == 1 << level:          #on boundary
+                    return (2.0**-level) / 3.0
+                else:                                              #not on boundary
+                    return (2.0**-level + 1.0) / 3.0
+            else:                                                  #neighbor point
+                return (2.0** -level) * (0.5 - 1.0 / 3.0)
+        else:
+            return 0
+
     def create_laplacian_matrix(self):
         left_term = 0.0
         right_term = 0.0

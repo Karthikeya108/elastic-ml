@@ -45,7 +45,10 @@ class SparseGridWrapper(DatasetWrapper):
                 
                 residual = self.grid.eval(params_DV, x_DV) - y
                 residuals.append(residual*residual)
-            regularizer = params_DV.l2Norm()
+            #regularizer = params_DV.l2Norm()
+            laplacian_matrix = self.grid.create_laplacian_matrix()
+            laplace_regularizer = np.dot(laplacian_matrix, params_DV.array())
+            regularizer = DataVector(laplace_regularizer).l2Norm()
             regularizer = self.l*regularizer*regularizer
             return 0.5*np.mean(residuals) + regularizer
     

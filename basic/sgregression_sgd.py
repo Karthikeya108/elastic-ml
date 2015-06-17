@@ -105,15 +105,13 @@ def openFile(filename):
     else:
         return readDataTrivial(filename)
 
-def estimate_grid_coefficients(fullgrid_dict, grid_coeffs_init, labels):
-    grid_results = []
-    for key, values in fullgrid_dict.iteritems():
-        grid_results.append(values[2])
+def evaluate_cost_function(grid_results, grid_coeffs, labels):
+    error = [np.dot(grid_result, grid_coeffs) for grid_result in grid_results] - labels
+    error = error*error
+    
+    return  np.sum(error) / len(error)
 
-    grid_results = np.array(grid_results).T
-    print grid_results.shape
-    print np.array(grid_coeffs_init).shape
-
+def estimate_grid_coefficients(grid_results, grid_coeffs_init, labels):
     func = lambda c: np.linalg.norm(np.sum(np.dot(g,c) for g in grid_results) - labels)
 
     cons = ({'type': 'eq', 'fun' : lambda c: np.sum(c) - 1})
@@ -135,11 +133,22 @@ def evaluate_error(labels, alpha, design_matrix):
 
     return mse
 
-def collect_mse(s, y, collection, mult_eval):
+def compute_grid_refinement_indicator(grid_result, labels):
+    error = grid_result - labels
+    error = error*error
+
+    return  np.sum(error) / (len(labels) - 1)
+
+
+def collect_mse(grid, l, s, y, collection, mult_eval):
     print s.provider._counter
     if s.provider._counter % 10 == 0:
         params_DV = s.bestParameters
-        results_DV = np.dot(mult_eval.array(), params_DV)
+        laplacian_matrix = grid.create_laplacian_matrix()
+        laplace_regularizer = np.dot(laplacian_matrix, params_DV)
+        regularizer = DataVector(laplace_regularizer).l2Norm()
+        regularizer = l*regularizer*regularizer
+        results_DV = np.dot(mult_eval.array(), params_DV) + regularizer
         residual = np.linalg.norm(y - results_DV)
         collection.append([s.bestParameters, results_DV, s.provider._counter, np.mean(s.learning_rate), residual**2/len(y)])
 
@@ -148,28 +157,22 @@ def run(grid, alpha, training, labels):
 
     data = np.vstack((training.T,labels)).T
 
-    '''
-    if options.regstr == 'identity':
-        opL = createOperationIdentity(grid)
-    elif options.regstr == 'laplace':
-        opL = createOperationLaplace(grid)
-    '''
     print "Forming the Desing Matrix" 
     design_matrix = grid.evaluate(DataMatrix(training))
     #design_matrix = DataMatrix(design_matrix)
 
-    l = 1E-8
+    l = 1E-5
 
     print "Creating Sparse Grid Wrapper"
     f = SparseGridWrapper(grid, data, l)
     x0 = np.zeros(grid_size)
 
     collect_fd = []
-    collect_cb = lambda s: collect_mse(s, labels, collect_fd, design_matrix)
+    collect_cb = lambda s: collect_mse(grid, l, s, labels, collect_fd, design_matrix)
     f.reset()
     algo = vSGDfd(f, x0, callback=collect_cb, loss_target=-np.inf, init_samples=1, batch_size=10)
     print "Running SGD"
-    algo.run(100)
+    algo.run(10)
 
     collect_fd = np.array(collect_fd)
 
@@ -205,7 +208,7 @@ def do_regression():
     print "Size of datasets is:", numData
     print "Level is: ", options.level
 
-    lmin = tuple([2] * dim)
+    lmin = tuple([1] * dim)
     lmax = tuple([5] * dim)
     factory = ActiveSetFactory.ClassicDiagonalActiveSet(lmax, lmin, 0)
     activeSet = factory.getActiveSet()
@@ -217,6 +220,7 @@ def do_regression():
     grid_coeffs_init = []
     for key, value in scheme.dictOfScheme.iteritems():
         grid = FullGrid(dim, key)
+        print grid.get_storage()
         grid_coeffs_init.append(value)
 
         print "Gridsize is:", grid.get_size()
@@ -226,14 +230,26 @@ def do_regression():
 
         grid, alpha, result, error = run(grid, alpha, training, labels)
 
-        fullgrid_dict[key] = [grid, alpha, result, error]
+        grid_refine_ind = compute_grid_refinement_indicator(result, labels)
+
+        print "Grid Refinement Indicator Value: ",grid_refine_ind
+
+        fullgrid_dict[key] = [grid, alpha, result, error, grid_refine_ind]
 
     for key, values in fullgrid_dict.iteritems():
         print key,":  ",values[3]
 
-    grid_coeffs = estimate_grid_coefficients(fullgrid_dict, grid_coeffs_init, labels)
+    grid_results = []                                     # u vector
+    for key, values in fullgrid_dict.iteritems():       
+        grid_results.append(values[2])
 
-    print np.sum(grid_coeffs)
+    grid_results = np.array(grid_results).T
+
+    grid_coeffs = estimate_grid_coefficients(grid_results, grid_coeffs_init, labels)   # w vector
+  
+    error = evaluate_cost_function(grid_results, grid_coeffs, labels)
+
+    print "Cost Function MSE: ", error
 
     return fullgrid_dict, grid_coeffs
 
