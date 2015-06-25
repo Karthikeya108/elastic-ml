@@ -4,7 +4,7 @@ Created on Feb 11, 2015
 @author: perun
 '''
 import sys
-sys.path.append('/home/karthikeya/svn/repo/lib/pysgpp')
+sys.path.append('/home/svn/sgpp/trunk/pysgpp')
 from pysgpp import Grid, DataVector, DataMatrix, createOperationMultipleEval
 from pysgpp import createOperationLTwoDotProduct
 from algorithms import vSGD, SGD, vSGDfd
@@ -76,11 +76,15 @@ class SparseGridWrapper(DatasetWrapper):
             mult_eval.transpose()
             gradient = DataVector(np.dot(mult_eval.array(), single_alpha.array()))
          
-            residual = gradient.dotProduct(params_DV) - y;
-            gradient.mult(residual);
+            residual = gradient.dotProduct(params_DV) - y
+            #TODO: Add regularization term
+            laplacian_matrix = self.grid.create_laplacian_matrix()
+            laplace_regularizer = np.dot(laplacian_matrix, params_DV.array())
+            gradient.mult(residual)
+            gradient += np.sum(laplace_regularizer) * self.l
             #import ipdb; ipdb.set_trace() #
-
-            gradient_array[sample_idx, :] =  gradient.array()
+           
+            gradient_array[sample_idx, :] =  gradient
         return gradient_array
     
     
