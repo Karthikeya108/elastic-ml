@@ -1,7 +1,8 @@
+from __future__ import division
 from scipy import mean, isnan
 from numpy.matlib import repmat
 from pybrain.utilities import setAllArgs
-
+import matplotlib.pyplot as plt
 
 class GradientBasedOptimizer(object):
     """ Parent class for a number gradient descent variants. 
@@ -45,7 +46,7 @@ class GradientBasedOptimizer(object):
         """ Obtain the gradient information for the specified number of samples
         from the provider object. """
         self.provider.nextSamples(self.batch_size)
-        self._last_gradients = self.provider.currentGradients(self.parameters)    
+        self._last_gradients = self.provider.currentGradients(self.parameters)   
     
     @property
     def _last_gradient(self):
@@ -71,11 +72,16 @@ class GradientBasedOptimizer(object):
         return self.parameters
     
     def run(self, maxsteps=None):
-        tmp = maxsteps+self._num_updates
-        while not self.terminate(tmp):
-            self.oneStep()
+         loss_value = []
+         tmp = maxsteps+self._num_updates
+         while not self.terminate(tmp, loss_value):
+             loss_value.append(self.provider.currentLosses(self.bestParameters))
+             self.oneStep()
+         print loss_value
+         plt.plot(loss_value)
+         plt.show()
     
-    def terminate(self, maxsteps):
+    def terminate(self, maxsteps, loss_value):
         """ Termination criteria """
         if maxsteps is not None:
             if self._num_updates >= maxsteps:
@@ -84,6 +90,9 @@ class GradientBasedOptimizer(object):
             l = self.provider.currentLosses(self.bestParameters)
             if mean(l) <= self.loss_target:
                 return True
+            if len(loss_value) > 15:
+                if (loss_value[-5] - loss_value[-1]) / (loss_value[-6] - loss_value[-5]) < 1:
+                    return True
         if sum(isnan(self.parameters)) + sum(isnan(self.parameters)) > 0:
             print 'Diverged'
             return True

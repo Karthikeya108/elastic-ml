@@ -50,8 +50,24 @@ class SparseGridWrapper(DatasetWrapper):
             laplace_regularizer = np.dot(laplacian_matrix, params_DV.array())
             regularizer = DataVector(laplace_regularizer).l2Norm()
             regularizer = self.l*regularizer*regularizer
-            return 0.5*np.mean(residuals) + regularizer
-    
+            return np.mean(residuals) + regularizer
+
+    def custom_loss_fun(self, params):
+        params_DV = DataVector(params)
+        design_matrix = self.grid.evaluate(DataMatrix(self.dataset[:,:self.dim]))
+        error = DataVector(len(self.dataset[:,self.dim]))
+        error = DataVector(np.dot(design_matrix.array(), params))
+        error.sub(DataVector(self.dataset[:,self.dim]))
+        error.sqr()
+        residual = error.sum() / float(len(error))
+
+        laplacian_matrix = self.grid.create_laplacian_matrix()
+        laplace_regularizer = np.dot(laplacian_matrix, params_DV.array())
+        regularizer = DataVector(laplace_regularizer).l2Norm()
+        regularizer = self.l*regularizer*regularizer
+
+        return residual + regularizer
+
     
     def gradient_fun(self, params):
         '''

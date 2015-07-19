@@ -1,5 +1,5 @@
 import sys, os
-sys.path.append('/home/karthikeya/svn/repo/lib/pysgpp')
+sys.path.append('/home/svn/sgpp/trunk/pysgpp')
 from pysgpp import *
 import numpy as np
 import itertools
@@ -95,6 +95,19 @@ class FullGrid:
                         column.append(self.linear_basis_function(self.storage[i], self.dim, val))
                 result.append(column)
         return DataMatrix(result)
+
+    def get_coordinates(self):
+        coordinates = {}
+        for index, dim_level_idx in self.storage.iteritems():
+             coord = [0.0] * self.dim
+             for d in xrange(self.dim):
+                 level_idx = dim_level_idx[d]
+                 h = 1.0 / 2**level_idx[0]
+                 coord[d] = h * level_idx[1]
+
+             coordinates[tuple(coord)] = index
+                     
+        return coordinates
 
     def func_num_to_index_list(self, point):
         phi = [None] * self.dim
