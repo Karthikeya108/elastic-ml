@@ -16,6 +16,7 @@ class Minion:
         print "Levels: ",self.levels
         grid_props.estimate_coefficients(self.training, self.labels, imax)
 
+        grid_refinement_list = []
         if grid_props.grid_refine_ind > self.grid_refine_threshold:
             new_levels = self.levels
             for k in xrange(len(self.levels)):
@@ -23,6 +24,6 @@ class Minion:
                     new_levels = list(self.levels)
                     new_levels[k] += 1
                     new_levels = tuple(new_levels)
-                    grid_props.grid_refinement_list.append(new_levels)
+                    grid_refinement_list.append(new_levels)
 
-        return grid_props
+        return grid_props, grid_refinement_list

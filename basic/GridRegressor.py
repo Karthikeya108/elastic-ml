@@ -35,7 +35,6 @@ class GridRegressor:
         self.grid_refine_ind = 0
         self.grid_result = [None] * self.grid.get_size()
         self.mse = 0
-        self.grid_refinement_list = []
    
     def coefficient_interpolation(self, parent_grid_props):
         self.alpha = DataVector(self.grid.get_size())
